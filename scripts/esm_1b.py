@@ -4,7 +4,7 @@
 # Install the transformers package WITH the ESM model. 
 # It is unfortunately not available in the official release yet.
 #!git clone -b add_esm-proper --single-branch https://github.com/liujas000/transformers.git 
-get_ipython().system('pip -q install ./transformers')
+#get_ipython().system('pip -q install ./transformers')
 
 
 # Load packages
@@ -24,10 +24,6 @@ elif torch.cuda.is_available():
     device = torch.device("cuda")
 else:
     device = torch.device("cpu")
-
-# What is this notebook about?
-generator = pipeline("text-generation", model = "gpt2", pad_token_id = 50256, num_return_sequences=1)
-print(generator("This notebook is all about proteins, friends and ")[0]['generated_text'])
 
 # Data preprocessing
 
