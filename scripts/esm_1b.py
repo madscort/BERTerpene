@@ -154,7 +154,8 @@ class SequenceDataset(Dataset):
 # Training using pytorch only
 
 num_labels = len(set(train_dataset.classes()))
-batch_size = 1
+epochs = 1
+batch_size = 10
 
 model = ESMForSequenceClassification.from_pretrained(
     "facebook/esm-1b",
@@ -172,7 +173,7 @@ train_loader = DataLoader(train_dataset,
 
 optim = AdamW(model.parameters(), lr=5e-5)
 
-for epoch in range(batch_size):
+for epoch in range(epochs):
     for batch in train_loader:
         
         optim.zero_grad()
