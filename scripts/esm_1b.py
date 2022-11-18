@@ -19,9 +19,7 @@ from torch.utils.data import DataLoader, Dataset
 from torch.nn.functional import one_hot
 
 # Use MPS or CUDA if available:
-if torch.backends.mps.is_available():
-    device = torch.device("mps")
-elif torch.cuda.is_available():
+if torch.cuda.is_available():
     device = torch.device("cuda")
 else:
     device = torch.device("cpu")
@@ -181,10 +179,10 @@ val_dataset = SequenceDataset(val_seq, val_labels)
 
 num_labels = len(set(train_dataset.classes()))
 model = ESMForSequenceClassification.from_pretrained(
-    "facebook/esm2_t6_8M_UR50D",
+    "facebook/esm2_t12_35M_UR50D",
     num_labels=num_labels,
     problem_type="multi_label_classification")
-epochs = 1
+epochs = 25
 batch_size = 10
 learning_rate = 5e-5
 optimizer = AdamW(model.parameters(),
