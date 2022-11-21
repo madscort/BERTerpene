@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# coding: utf-8
+# coding: utf-
 
 # Install the transformers package WITH the ESM model. 
 # It is unfortunately not available in the official release yet.
@@ -25,6 +25,7 @@ if torch.cuda.is_available():
     print("- CUDA IS USED -")
 else:
     device = torch.device("cpu")
+    print("- CUDA IS NOT USED -")
 
 # Stop verbose transformers logging:
 logging.set_verbosity_error()
@@ -44,12 +45,6 @@ def time_step(elapsed):
     # Format as hh:mm:ss
     return str(datetime.timedelta(seconds=elapsed_rounded))
 
-
-# What is this notebook about?
-generator = pipeline("text-generation", model = "gpt2", pad_token_id = 50256, num_return_sequences=1)
-print(generator("This notebook is all about proteins, friends and ")[0]['generated_text'])
-
-
 # Data preprocessing
 
 # Get sequences, accession number and main category labels:
@@ -60,7 +55,7 @@ acc_num = list()
 main_cat = list()
 
 first = True
-with open("../data/terp.faa") as file:
+with open("./data/terp.faa") as file:
     
     first_acc = file.readline()
     acc_num.append(first_acc.split(">")[1].strip())
@@ -87,7 +82,7 @@ label2main = {l: c for c, l in main2label.items()}
 
 acc2class = dict()
 
-with open("../data/class_vs_acc_v2.txt", "r") as file:
+with open("./data/class_vs_acc_v2.txt", "r") as file:
     for line in file:
         t_class = line.split("\t")[0]
         acc = line.split("\t")[1].strip()[1:]
@@ -196,7 +191,7 @@ model = ESMForSequenceClassification.from_pretrained(
 # The DataLoader splits the dataset by batch size,
 # and returns an iter to go through each batch of samples.
 
-epochs = 1
+epochs = 5
 batch_size = 1
 
 train_loader = DataLoader(train_dataset,
@@ -225,14 +220,20 @@ out_name = "_".join([model_name,
                      "B" + str(batch_size),
                      "T" + datetime.datetime.now().strftime("%m%d%H%M")])
 
-results_file = open("../results/exploration/" + out_name + ".res", "w")
+results_file = open("./results/exploration/" + out_name + ".res", "w")
 print(f"fold\ttrain_loss\tval_loss\ttrain_accu\tval_accu\tbalanced_train_accu\tbalanced_val_accu",
       file = results_file)
+
 
 # Training
 device = torch.device("cpu")
 model.to(device)
 total_t0 = time.time()
+
+train_acc = list()
+val_acc = list()
+train_loss = list()
+val_loss = list()
 
 for epoch in range(epochs):
     
@@ -273,7 +274,7 @@ for epoch in range(epochs):
         total_balanced_train_accuracy += balanced_accuracy_score(
             input_labels.argmax(axis=1),
             logits.argmax(axis=1))
-
+        break
         output.loss.backward()
         optimizer.step()
         scheduler.step() # Update learning rate
@@ -281,6 +282,8 @@ for epoch in range(epochs):
     avg_train_loss = total_train_loss / len(train_loader)
     avg_train_accuracy = total_train_accuracy / len(train_loader)
     avg_balanced_train_accuracy = total_balanced_train_accuracy / len(train_loader)
+    train_loss.append(float(avg_train_loss))
+    train_acc.append(float(avg_train_accuracy))
 
     print(f"Average training loss: {avg_train_loss:.2f}")
     print(f"Average training accuracy: {avg_train_accuracy:.2f}")
@@ -321,12 +324,14 @@ for epoch in range(epochs):
         total_balanced_val_accuracy += balanced_accuracy_score(
                                         labels.argmax(axis=1),
                                         logits.argmax(axis=1))
-    
+        break
     avg_val_loss = total_val_loss / len(val_loader)
     avg_val_accuracy = total_val_accuracy / len(val_loader)
     avg_balanced_val_accuracy = total_balanced_val_accuracy / len(val_loader)
     validation_time = time_step(time.time() - t0)
-    
+    val_loss.append(float(avg_val_loss))
+    val_acc.append(float(avg_val_accuracy))
+
     print(f"Average validation loss: {avg_val_loss:.2f}")
     print(f"Average validation accuracy: {avg_val_accuracy:.2f}")
     print(f"Average balanced validation accuracy: {avg_balanced_val_accuracy:.2f}")
@@ -347,6 +352,7 @@ print("Success!\n")
 print(f"Total training time: {time_step(time.time() - total_t0)}")
 results_file.close()
 
+
 # Save output as a plot
 
 epoch = np.arange(1, epochs + 1)
@@ -359,5 +365,7 @@ ax[1].plot(epoch, train_loss, 'r', epoch, val_loss, 'b')
 ax[1].legend(['Train Loss','Validation Loss'])
 ax[1].set_xlabel('Epochs')
 ax[1].set_ylim(0,1)
-plt.savefig("../results/exploration/" + out_name + ".pdf")
+plt.savefig("./results/exploration/" + out_name + ".pdf")
+
+
 
