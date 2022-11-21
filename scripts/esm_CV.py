@@ -6,12 +6,10 @@
 #!git clone -b add_esm-proper --single-branch https://github.com/liujas000/transformers.git 
 #!pip -q install ./transformers
 
-
 # Load packages
 import time, datetime, warnings, torch
 import numpy as np
-import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedKFold, KFold
 from sklearn.metrics import accuracy_score, balanced_accuracy_score
 from transformers import pipeline, ESMTokenizer, ESMForSequenceClassification, AdamW, logging
 from transformers import get_linear_schedule_with_warmup as linear_scheduler
@@ -19,10 +17,9 @@ from transformers import get_constant_schedule_with_warmup as constant_scheduler
 from torch.utils.data import DataLoader, Dataset
 from torch.nn.functional import one_hot
 
-# Use CUDA if available:
+# Use MPS or CUDA if available:
 if torch.cuda.is_available():
     device = torch.device("cuda")
-    print("- CUDA IS USED -")
 else:
     device = torch.device("cpu")
 
@@ -32,28 +29,19 @@ logging.set_verbosity_error()
 # Stop sklearn warnings
 warnings.filterwarnings('ignore')
 
-
 # Timing helper function
 def time_step(elapsed):
     '''
     Takes a time in seconds and returns a string hh:mm:ss
     '''
     # Round to the nearest second.
-    elapsed_rounded = int(round((elapsed)))
-    
+    elapsed_rounded = int(round(elapsed))
     # Format as hh:mm:ss
     return str(datetime.timedelta(seconds=elapsed_rounded))
-
-
-# What is this notebook about?
-generator = pipeline("text-generation", model = "gpt2", pad_token_id = 50256, num_return_sequences=1)
-print(generator("This notebook is all about proteins, friends and ")[0]['generated_text'])
-
 
 # Data preprocessing
 
 # Get sequences, accession number and main category labels:
-
 sequence = ""
 sequences = list()
 acc_num = list()
@@ -104,22 +92,13 @@ print(
     f"{len(set(main_cat))} main categories and",
     f"{len(set(acc2class.values()))} classes")
 
-
 # Choose between category and class:
 labels = main_cat
 #labels = acc_num # This will translate to class later.
 
-# Split into training and validation set. Is this necessary?
-
-train_seq, val_seq, train_labels, val_labels = train_test_split(sequences, labels, test_size=.1)
-
-print(f"Training size: {len(train_seq)} Validation size: {len(val_seq)}")
-
-
 # Tokenizer:
 tokenizer = ESMTokenizer.from_pretrained("facebook/esm2_t6_8M_UR50D",
                                          do_lower_case=False)
-
 
 class SequenceDataset(Dataset):
     def __init__(self, input_sequences, input_labels, categories=True):
@@ -176,121 +155,136 @@ class SequenceDataset(Dataset):
         return sample
 
 
-# Transform data to dataset class:
-train_dataset = SequenceDataset(train_seq, train_labels)
-val_dataset = SequenceDataset(val_seq, val_labels)
-
-
 # SETTINGS:
 
 # Model specifications:
-num_labels = len(set(train_dataset.classes()))
 model_name = "esm2_t6_8M_UR50D"
 model_version = "facebook/" + model_name
-model = ESMForSequenceClassification.from_pretrained(
-    model_version,
-    num_labels = num_labels,
-    problem_type = "multi_label_classification")
+num_labels = 10
 
-# Data loading:
-# The DataLoader splits the dataset by batch size,
-# and returns an iter to go through each batch of samples.
-
+# Training
 epochs = 1
 batch_size = 1
-
-train_loader = DataLoader(train_dataset,
-                          batch_size=batch_size,
-                          shuffle=True)
-val_loader = DataLoader(val_dataset,
-                        batch_size=batch_size,
-                        shuffle=True)
-
-# Optimizer, learning rate and optional learning rate decay.
-
 learning_rate = 5e-5
-optimizer = AdamW(model.parameters(),
-                  lr = learning_rate)
-scheduler = linear_scheduler(optimizer,
-                             num_warmup_steps = 0,
-                             num_training_steps = len(train_loader) * epochs)
 
-# If you don't want decay - uncomment this:
-# scheduler = constant_scheduler(optimizer,
-#                                num_warmup_steps = 0)
+# Cross-validation
+num_splits = 5
+
+# # Stratified (force even distribution of classes)
+# folds = StratifiedKFold(n_splits = num_splits,
+#                         shuffle = True)
+# Don't stratify:
+folds = KFold(n_splits = num_splits,
+              shuffle = True)
 
 # Logging:
 out_name = "_".join([model_name,
                      "E" + str(epochs),
                      "B" + str(batch_size),
+                     "CV" + str(num_splits),
                      "T" + datetime.datetime.now().strftime("%m%d%H%M")])
 
-results_file = open("../results/exploration/" + out_name + ".res", "w")
+results_file = open("../results/" + out_name + ".res", "w")
 print(f"fold\ttrain_loss\tval_loss\ttrain_accu\tval_accu\tbalanced_train_accu\tbalanced_val_accu",
       file = results_file)
 
 # Training
-device = torch.device("cpu")
-model.to(device)
+
 total_t0 = time.time()
 
-for epoch in range(epochs):
-    
-    print(f"#------ EPOCH {epoch+1} of {epochs}")
-    print(f"#--- Training")
-    # Training step
+for fold, (train_index, val_index) in enumerate(folds.split(sequences, labels)):
+    print(f"\n****** FOLD {fold+1} of {num_splits} ******")
 
-    model.train()
-    total_train_loss = 0
-    total_train_accuracy = 0
-    total_balanced_train_accuracy = 0
+    # Divide data (kfold wants arrays, the tokenizer wants lists = crappy looking code):
+    train_seq, train_labels = np.array(sequences)[train_index].tolist(), np.array(labels)[train_index].tolist()
+    val_seq, val_labels = np.array(sequences)[val_index].tolist(), np.array(labels)[val_index].tolist()
 
-    for step, batch in enumerate(train_loader):
-        
-        if step % 5 == 0:
-            time_elapsed = time_step(time.time() - total_t0)
-            print(f"#- Batch {step+1} of {len(train_loader)} \t- {time_elapsed} (time elapsed)")
-        
-        optimizer.zero_grad()
-        input_ids = batch['input_ids'].to(device)
-        attention_mask = batch['attention_mask'].to(device)
-        input_labels = batch['label'].to(device)
+    # Convert to SequenceDataset:
+    train_dataset = SequenceDataset(train_seq, train_labels)
+    val_dataset = SequenceDataset(val_seq, val_labels)
 
-        output = model(input_ids,
-                       token_type_ids=None,
-                       attention_mask=attention_mask,
-                       labels=input_labels)
+    # Load:
+    train_loader = DataLoader(train_dataset,
+                              batch_size=batch_size,
+                              shuffle=True)
+    val_loader = DataLoader(val_dataset,
+                            batch_size=batch_size,
+                            shuffle=True)
 
-        # Get loss
-        total_train_loss += output.loss
+    # Reset model:
+    # num_labels = len(set(train_dataset.classes()))
+    model = ESMForSequenceClassification.from_pretrained(
+        model_version,
+        num_labels = num_labels,
+        problem_type = "multi_label_classification")
+    model.to(device)
 
-        # Get accuracy
-        logits = output.logits.detach().cpu().numpy()
-        input_labels = input_labels.to('cpu').numpy()
-        total_train_accuracy += accuracy_score(input_labels.argmax(axis=1),
-                                               logits.argmax(axis=1))
+    # Add optimizer and scheduler
+    optimizer = AdamW(model.parameters(),
+                      lr = learning_rate)
+    scheduler = linear_scheduler(optimizer,
+                                 num_warmup_steps = 0,
+                                 num_training_steps = len(train_loader) * epochs)
 
-        total_balanced_train_accuracy += balanced_accuracy_score(
-            input_labels.argmax(axis=1),
-            logits.argmax(axis=1))
+    # If you don't want decay - uncomment this:
+    # scheduler = constant_scheduler(optimizer,
+    #                                num_warmup_steps = 0)
 
-        output.loss.backward()
-        optimizer.step()
-        scheduler.step() # Update learning rate
+    for epoch in range(epochs):
 
-    avg_train_loss = total_train_loss / len(train_loader)
-    avg_train_accuracy = total_train_accuracy / len(train_loader)
-    avg_balanced_train_accuracy = total_balanced_train_accuracy / len(train_loader)
+        print(f"#------ EPOCH {epoch+1} of {epochs}")
+        print(f"#--- Training")
+        # Training step
 
-    print(f"Average training loss: {avg_train_loss:.2f}")
-    print(f"Average training accuracy: {avg_train_accuracy:.2f}")
-    print(f"Average balanced training accuracy: {avg_balanced_train_accuracy:.2f}")
+        model.train()
+        total_train_loss = 0
+        total_train_accuracy = 0
+        total_balanced_train_accuracy = 0
 
-    # Evaluation step
+        for step, batch in enumerate(train_loader):
+
+            if step % 5 == 0:
+                time_elapsed = time_step(time.time() - total_t0)
+                print(f"#- Batch {step+1} of {len(train_loader)} \t- {time_elapsed} (time elapsed)")
+
+            optimizer.zero_grad()
+            input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
+            input_labels = batch['label'].to(device)
+
+            output = model(input_ids,
+                           token_type_ids=None,
+                           attention_mask=attention_mask,
+                           labels=input_labels)
+            # Get loss
+            total_train_loss += output.loss
+
+            # Get accuracy
+            logits = output.logits.detach().cpu().numpy()
+            input_labels = input_labels.to('cpu').numpy()
+            total_train_accuracy += accuracy_score(input_labels.argmax(axis=1),
+                                                 logits.argmax(axis=1))
+
+            total_balanced_train_accuracy += balanced_accuracy_score(
+                input_labels.argmax(axis=1),
+                logits.argmax(axis=1))
+
+            output.loss.backward()
+            optimizer.step()
+            scheduler.step() # Update learning rate
+
+        avg_train_loss = total_train_loss / len(train_loader)
+        avg_train_accuracy = total_train_accuracy / len(train_loader)
+        avg_balanced_train_accuracy = total_balanced_train_accuracy / len(train_loader)
+
+        print(f"Average training loss: {avg_train_loss:.2f}")
+        print(f"Average training accuracy: {avg_train_accuracy:.2f}")
+        print(f"Average balanced training accuracy: {avg_balanced_train_accuracy:.2f}")
+
+    # Validation
     print(f"\n#****** Validation")
-    
+
     model.eval()
-    t0 = time.time()
     total_val_loss = 0
     total_val_accuracy = 0
     total_balanced_val_accuracy = 0
@@ -299,41 +293,37 @@ for epoch in range(epochs):
 
         input_ids = batch['input_ids'].to(device)
         attention_mask = batch['attention_mask'].to(device)
-        labels = batch['label'].to(device)
+        input_labels = batch['label'].to(device)
 
         # Dont construct unnecessary compute-graph:
         with torch.no_grad():
             output = model(input_ids,
                            token_type_ids=None,
                            attention_mask=attention_mask,
-                           labels=labels)
-        
-        total_val_loss += output.loss
-        
-        logits = output.logits.detach().cpu().numpy()
-        labels = labels.to('cpu').numpy()
-        
+                           labels=input_labels)
 
-        
-        total_val_accuracy += accuracy_score(labels.argmax(axis=1),
+        total_val_loss += output.loss
+
+        logits = output.logits.detach().cpu().numpy()
+        input_labels = input_labels.to('cpu').numpy()
+
+        total_val_accuracy += accuracy_score(input_labels.argmax(axis=1),
                                              logits.argmax(axis=1))
-        
+
         total_balanced_val_accuracy += balanced_accuracy_score(
-                                        labels.argmax(axis=1),
-                                        logits.argmax(axis=1))
-    
+            input_labels.argmax(axis=1),
+            logits.argmax(axis=1))
+
     avg_val_loss = total_val_loss / len(val_loader)
     avg_val_accuracy = total_val_accuracy / len(val_loader)
     avg_balanced_val_accuracy = total_balanced_val_accuracy / len(val_loader)
-    validation_time = time_step(time.time() - t0)
-    
+
     print(f"Average validation loss: {avg_val_loss:.2f}")
     print(f"Average validation accuracy: {avg_val_accuracy:.2f}")
     print(f"Average balanced validation accuracy: {avg_balanced_val_accuracy:.2f}")
-    print(f"Validation time: {validation_time}\n")
 
     # Save output:
-    print(epoch + 1,
+    print(fold + 1,
           f"{avg_train_loss:.4f}",
           f"{avg_val_loss:.4f}",
           f"{avg_train_accuracy:.4f}",
@@ -346,18 +336,4 @@ for epoch in range(epochs):
 print("Success!\n")
 print(f"Total training time: {time_step(time.time() - total_t0)}")
 results_file.close()
-
-# Save output as a plot
-
-epoch = np.arange(1, epochs + 1)
-plt.figure()
-fig, ax = plt.subplots(1, 2, figsize=(10, 5), sharey=True)
-ax[0].plot(epoch, train_acc, 'r', epoch, val_acc, 'b')
-ax[0].legend(['Train Accuracy','Validation Accuracy'])
-ax[0].set_xlabel('Epochs')
-ax[1].plot(epoch, train_loss, 'r', epoch, val_loss, 'b')
-ax[1].legend(['Train Loss','Validation Loss'])
-ax[1].set_xlabel('Epochs')
-ax[1].set_ylim(0,1)
-plt.savefig("../results/exploration/" + out_name + ".pdf")
 
