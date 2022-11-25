@@ -8,7 +8,8 @@
 
 
 # Load packages
-import time, datetime, warnings, torch
+import time, datetime, warnings, torch, sys
+from argparse import ArgumentParser
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
@@ -18,6 +19,39 @@ from transformers import get_linear_schedule_with_warmup as linear_scheduler
 from transformers import get_constant_schedule_with_warmup as constant_scheduler
 from torch.utils.data import DataLoader, Dataset
 from torch.nn.functional import one_hot
+
+# Parse cmd-line arguments:
+
+parser = ArgumentParser(description="<3<3 Fine-tune ESM-2 model on protein sequence data <3<3")
+parser.add_argument("--epochs", action="store", dest="epochs", type=int, default=5,
+                    help="number of epochs (default: 5)")
+parser.add_argument("--batch_size", action="store", dest="batch_s", type=int, default=10,
+                    help="mini-batch size (default: 10)")
+parser.add_argument("--model", action="store", dest="model", type=str, default="esm2_t6_8M_UR50D",
+                    help="ESM model (default: esm2_t6_8M_UR50D)")
+parser.add_argument("--models_avail", action="store_true", help="show models available")
+
+args = parser.parse_args()
+
+if args.models_avail:
+    print("""
+    Available models:
+        esm2_t6_8M_UR50D
+        esm2_t12_35M_UR50D
+        esm2_t30_150M_UR50D
+        esm2_t33_650M_UR50D
+        esm2_t36_3B_UR50D
+        esm2_t48_15B_UR50D
+    """)
+    sys.exit(0)
+
+########## SETTINGS ##########
+
+epochs = args.epochs
+batch_size = args.batch_s
+model_name = args.model
+
+##############################
 
 # Use CUDA if available:
 if torch.cuda.is_available():
@@ -40,7 +74,7 @@ def time_step(elapsed):
     Takes a time in seconds and returns a string hh:mm:ss
     '''
     # Round to the nearest second.
-    elapsed_rounded = int(round((elapsed)))
+    elapsed_rounded = int(round(elapsed))
     
     # Format as hh:mm:ss
     return str(datetime.timedelta(seconds=elapsed_rounded))
@@ -175,12 +209,8 @@ class SequenceDataset(Dataset):
 train_dataset = SequenceDataset(train_seq, train_labels)
 val_dataset = SequenceDataset(val_seq, val_labels)
 
-
-# SETTINGS:
-
 # Model specifications:
 num_labels = len(set(train_dataset.classes()))
-model_name = "esm2_t6_8M_UR50D"
 model_version = "facebook/" + model_name
 model = ESMForSequenceClassification.from_pretrained(
     model_version,
@@ -190,9 +220,6 @@ model = ESMForSequenceClassification.from_pretrained(
 # Data loading:
 # The DataLoader splits the dataset by batch size,
 # and returns an iter to go through each batch of samples.
-
-epochs = 5
-batch_size = 1
 
 train_loader = DataLoader(train_dataset,
                           batch_size=batch_size,
@@ -274,7 +301,7 @@ for epoch in range(epochs):
         total_balanced_train_accuracy += balanced_accuracy_score(
             input_labels.argmax(axis=1),
             logits.argmax(axis=1))
-        break
+
         output.loss.backward()
         optimizer.step()
         scheduler.step() # Update learning rate
@@ -324,7 +351,7 @@ for epoch in range(epochs):
         total_balanced_val_accuracy += balanced_accuracy_score(
                                         labels.argmax(axis=1),
                                         logits.argmax(axis=1))
-        break
+
     avg_val_loss = total_val_loss / len(val_loader)
     avg_val_accuracy = total_val_accuracy / len(val_loader)
     avg_balanced_val_accuracy = total_balanced_val_accuracy / len(val_loader)
