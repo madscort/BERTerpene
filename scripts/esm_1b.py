@@ -369,7 +369,7 @@ for epoch in range(epochs):
           f"{avg_train_loss:.4f}",
           f"{avg_val_loss:.4f}",
           f"{avg_train_accuracy:.4f}",
-          f"{avg_val_accuracy:.4f},"
+          f"{avg_val_accuracy:.4f}",
           f"{avg_balanced_train_accuracy:.4f}",
           f"{avg_balanced_val_accuracy:.4f}",
           sep = "\t",
