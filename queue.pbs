@@ -11,11 +11,11 @@
 ### -- set walltime limit: hh:mm --  maximum 24 hours for GPU-queues right now
 #BSUB -W 1:00
 # request 5GB of system-memory
-#BSUB -R "rusage[mem=5GB]"
+#BSUB -R "rusage[mem=60GB]"
 ### -- Specify the output and error file. %J is the job-id --
 ### -- -o and -e mean append, -oo and -eo mean overwrite --
-#BSUB -o ./log/gpu_%J.out
-#BSUB -e ./log/gpu_%J.err
+#BSUB -o ./logs/gpu_%J.out
+#BSUB -e ./logs/gpu_%J.err
 # -- end of LSF options --
 
 nvidia-smi
@@ -27,4 +27,4 @@ module load cuda/11.6
 
 pwd
 
-python3 scripts/esm_1b.py
+python3 scripts/esm_1b.py &> logs/$(date +"%m%d%M%H%M").log
