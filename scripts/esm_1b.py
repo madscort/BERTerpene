@@ -29,7 +29,10 @@ parser.add_argument("--batch_size", action="store", dest="batch_s", type=int, de
                     help="mini-batch size (default: 10)")
 parser.add_argument("--model", action="store", dest="model", type=str, default="esm2_t6_8M_UR50D",
                     help="ESM model (default: esm2_t6_8M_UR50D)")
+parser.add_argument("--data", action="store", dest="data", type=str, default="terp_only_large_classes.faa",
+                    help="ESM model (default: terp_only_large_classes.faa)")
 parser.add_argument("--models_avail", action="store_true", help="show models available")
+parser.add_argument("--data_avail", action="store_true", help="show datasets available")
 
 args = parser.parse_args()
 
@@ -45,13 +48,28 @@ if args.models_avail:
     """)
     sys.exit(0)
 
+if args.data_avail:
+    print("""
+    Available datasets:
+        terp.faa                        Raw dataset (10 classes).
+        terp_only_large_classes.faa     Raw data reduced to only large classes (5 classes).
+        neighbours_extended_terp.faa    Non-assigned sequences added by clustering of embeddings.
+        terp_classified_pHMM.faa        Non-assigned sequences added by hmm models.
+        dataset_size_all_246.faa        Synthetic sequences added to make all classes same size.
+        dataset_size_all_1000.faa       Synthetic sequences added to make all classes size 1000.
+    """)
+    sys.exit(0)
+
 ########## SETTINGS ##########
 
 epochs = args.epochs
 batch_size = args.batch_s
 model_name = args.model
+data = args.data
 
 ##############################
+
+print(f"Working on dataset: {data}")
 
 # Use CUDA if available:
 if torch.cuda.is_available():
@@ -66,7 +84,6 @@ logging.set_verbosity_error()
 
 # Stop sklearn warnings
 warnings.filterwarnings('ignore')
-
 
 # Timing helper function
 def time_step(elapsed):
@@ -89,7 +106,7 @@ acc_num = list()
 main_cat = list()
 
 first = True
-with open("./data/terp.faa") as file:
+with open("./data/" + data, "r") as file:
     
     first_acc = file.readline()
     acc_num.append(first_acc.split(">")[1].strip())
@@ -245,7 +262,8 @@ scheduler = linear_scheduler(optimizer,
 out_name = "_".join([model_name,
                      "E" + str(epochs),
                      "B" + str(batch_size),
-                     "T" + datetime.datetime.now().strftime("%m%d%H%M")])
+                     "D" + data.split(".")[0],
+                     "T" + datetime.datetime.now().strftime("%H%M")])
 
 results_file = open("./results/exploration/" + out_name + ".res", "w")
 print(f"fold\ttrain_loss\tval_loss\ttrain_accu\tval_accu\tbalanced_train_accu\tbalanced_val_accu",
@@ -388,6 +406,7 @@ fig, ax = plt.subplots(1, 2, figsize=(10, 5), sharey=True)
 ax[0].plot(epoch, train_acc, 'r', epoch, val_acc, 'b')
 ax[0].legend(['Train Accuracy','Validation Accuracy'])
 ax[0].set_xlabel('Epochs')
+ax[0].set_title(data)
 ax[1].plot(epoch, train_loss, 'r', epoch, val_loss, 'b')
 ax[1].legend(['Train Loss','Validation Loss'])
 ax[1].set_xlabel('Epochs')

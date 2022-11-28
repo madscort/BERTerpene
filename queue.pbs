@@ -9,9 +9,9 @@
 ### -- Select the resources: 1 gpu in exclusive process mode --
 #BSUB -gpu "num=1:mode=exclusive_process"
 ### -- set walltime limit: hh:mm --  maximum 24 hours for GPU-queues right now
-#BSUB -W 1:00
+#BSUB -W 15:00
 # request 5GB of system-memory
-#BSUB -R "rusage[mem=60GB]"
+#BSUB -R "rusage[mem=100GB]"
 ### -- Specify the output and error file. %J is the job-id --
 ### -- -o and -e mean append, -oo and -eo mean overwrite --
 #BSUB -o ./logs/gpu_%J.out
@@ -27,4 +27,4 @@ module load cuda/11.6
 
 pwd
 
-python3 scripts/esm_1b.py &> logs/$(date +"%m%d%M%H%M").log
+python3 scripts/esm_1b.py --epochs 50 --batch_size 5 &> logs/$(date +"%m%d%M%H%M").log
