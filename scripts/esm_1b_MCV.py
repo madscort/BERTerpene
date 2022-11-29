@@ -284,7 +284,7 @@ for epoch in range(epochs):
         total_balanced_train_accuracy += balanced_accuracy_score(
             input_labels.argmax(axis=1),
             logits.argmax(axis=1))
-        break
+
         output.loss.backward()
         optimizer.step()
         scheduler.step() # Update learning rate
