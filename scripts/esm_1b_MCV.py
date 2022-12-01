@@ -238,7 +238,7 @@ print(f"predict\tactual",
 
 
 # Training
-device = torch.device("cpu")
+
 model.to(device)
 total_t0 = time.time()
 

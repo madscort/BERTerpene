@@ -271,7 +271,6 @@ print(f"fold\ttrain_loss\tval_loss\ttrain_accu\tval_accu\tbalanced_train_accu\tb
 
 
 # Training
-device = torch.device("cpu")
 model.to(device)
 total_t0 = time.time()
 
